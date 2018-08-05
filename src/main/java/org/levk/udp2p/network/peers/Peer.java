@@ -1,5 +1,6 @@
 package org.levk.udp2p.network.peers;
 
+import org.bouncycastle.util.encoders.Hex;
 import org.levk.udp2p.serialization.ENCItem;
 import org.levk.udp2p.serialization.ENCList;
 import org.levk.udp2p.serialization.TRENC;
@@ -98,10 +99,10 @@ public class Peer {
             return false;
         }
 
-        if (!((Peer) o).getIpAddress().equals(this.ipAddress)) {
-            return false;
-        }
+        return ((Peer) o).getIpAddress().equals(this.ipAddress);
+    }
 
-        return true;
+    public String toString() {
+        return Hex.toHexString(this.address) + " : " + this.ipAddress.toString() + " : " + messagesSeen + "\n";
     }
 }

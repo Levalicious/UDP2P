@@ -29,6 +29,22 @@ public class SchnorrSig {
         this.s = s;
     }
 
+    public ECPoint getR() {
+        return R;
+    }
+
+    public byte[] getRBytes() {
+        return bigIntegerToBytes(R.getAffineXCoord().toBigInteger(), 32);
+    }
+
+    public BigInteger gets() {
+        return s;
+    }
+
+    public byte[] getsBytes() {
+        return bigIntegerToBytes(s, 32);
+    }
+
     public byte[] toBytes() {
         return merge(bigIntegerToBytes(R.getAffineXCoord().toBigInteger(), 32), bigIntegerToBytes(s, 32));
     }

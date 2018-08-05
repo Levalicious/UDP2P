@@ -8,7 +8,7 @@ import java.util.stream.IntStream;
 
 import static org.bouncycastle.pqc.math.linearalgebra.ByteUtils.xor;
 
-public class PeerSet {
+public  class PeerSet {
     private int peerCount;
 
     private int k;
@@ -23,7 +23,7 @@ public class PeerSet {
         buckets = new Peer[160][k];
     }
 
-    public boolean hasSpace(Peer p) {
+    public synchronized boolean hasSpace(Peer p) {
         int bucketIndex = calcDist(nodeAddress, p.getAddress()).indexOf('1');
 
         if (bucketIndex >= 0) {
@@ -39,7 +39,7 @@ public class PeerSet {
         return false;
     }
 
-    public void add(Peer p) {
+    public synchronized void add(Peer p) {
         int bucketIndex = calcDist(nodeAddress, p.getAddress()).indexOf('1');
 
         if (contains(bucketIndex, p.getAddress())) return;
@@ -57,7 +57,7 @@ public class PeerSet {
         }
     }
 
-    public void remove(byte[] address) {
+    public synchronized void remove(byte[] address) {
         int bucketIndex = calcDist(nodeAddress, address).indexOf('1');
 
         if (!contains(bucketIndex, address)) return;
@@ -76,7 +76,7 @@ public class PeerSet {
 
     }
 
-    public Peer getPeer(byte[] address) throws PeerNotFoundException {
+    public synchronized Peer getPeer(byte[] address) throws PeerNotFoundException {
         int bucketIndex = calcDist(nodeAddress, address).indexOf('1');
 
         if (!contains(bucketIndex, address)) throw new PeerNotFoundException();
@@ -94,13 +94,13 @@ public class PeerSet {
         return null;
     }
 
-    public void trimAllBuckets() {
+    public synchronized void trimAllBuckets() {
         for (int i = 0; i < 160; i++) {
             trimBucket(i);
         }
     }
 
-    public void trimBucket(int bucketIndex) {
+    public synchronized void trimBucket(int bucketIndex) {
         for (int i = 0; i < k; i++) {
             if (buckets[bucketIndex][i].toDelete()) {
                 buckets[bucketIndex][i] = null;
@@ -109,7 +109,7 @@ public class PeerSet {
         }
     }
 
-    public List<Peer> getAllPeers() {
+    public synchronized List<Peer> getAllPeers() {
         List<Peer> out = new ArrayList<>();
 
         for (int i = 0; i < 160; i++) {
@@ -123,7 +123,7 @@ public class PeerSet {
         return out;
     }
 
-    public List<Peer> toRefresh() {
+    public synchronized List<Peer> toRefresh() {
         List<Peer> out = new ArrayList<>();
 
         for (int i = 0; i < 160; i++) {
@@ -133,7 +133,7 @@ public class PeerSet {
         return out;
     }
 
-    public List<Peer> toRefreshBucket(int bucketIndex) {
+    public synchronized List<Peer> toRefreshBucket(int bucketIndex) {
         List<Peer> out = new ArrayList<>();
 
         for (int i = 0; i < k; i++) {
@@ -159,7 +159,7 @@ public class PeerSet {
         }
     }
 
-    public boolean contains(int bucketIndex, byte[] address) {
+    public synchronized boolean contains(int bucketIndex, byte[] address) {
         if (bucketIndex >= 0) {
             for (int i = 0; i < k; i++) {
                 if (Arrays.equals(address, buckets[bucketIndex][i].getAddress())) {
@@ -172,7 +172,7 @@ public class PeerSet {
     }
 
     /* Repeated because the less often calcdist needs to be run the better */
-    public boolean contains(byte[] address) {
+    public synchronized boolean contains(byte[] address) {
         int bucketIndex = calcDist(nodeAddress, address).indexOf('1');
 
         if (bucketIndex >= 0) {
@@ -186,14 +186,16 @@ public class PeerSet {
         return false;
     }
 
-    public Peer getRandom() {
+    public synchronized Peer getRandom() {
         SecureRandom rand = new SecureRandom();
 
         Peer temp = null;
 
-        while (temp == null) {
-            int i = rand.nextInt(160);
+        if (peerCount == 0) return null;
 
+        int i = rand.nextInt(160);
+
+        while (temp == null) {
             if (bucketContainsPeers(i)) {
                 for (int j = 0; j < k; j++) {
                     if (buckets[i][j] != null) {
@@ -201,12 +203,14 @@ public class PeerSet {
                     }
                 }
             }
+
+            i++;
         }
 
         return temp;
     }
 
-    public boolean bucketContainsPeers(int bucketIndex) {
+    public synchronized boolean bucketContainsPeers(int bucketIndex) {
         for (int i = 0; i < k; i++) {
             if (buckets[bucketIndex][i] != null) return true;
         }
@@ -239,7 +243,7 @@ public class PeerSet {
         return temp;
     }
 
-    public byte[] getEncoded() {
+    public synchronized byte[] getEncoded() {
         byte[][] toEncode = new byte[peerCount][];
 
         int encoded = 0;
@@ -255,7 +259,7 @@ public class PeerSet {
         return TRENC.encode(toEncode);
     }
 
-    public byte[] getSubset(int num) {
+    public synchronized byte[] getSubset(int num) {
         Set<byte[]> set = new HashSet<>();
 
         for (int i = 0; i < num; i++) {
@@ -276,5 +280,17 @@ public class PeerSet {
         }
 
         return TRENC.encode(toEncode);
+    }
+
+    public String toString() {
+        String out = "";
+
+        for (int i = 0; i < 160; i++) {
+            for (int j = 0; j < k; j++) {
+                out += buckets[i][j].toString();
+            }
+        }
+
+        return out;
     }
 }

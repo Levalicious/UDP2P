@@ -1,7 +1,8 @@
 package org.levk.udp2p.network;
 
-import afu.org.checkerframework.checker.oigj.qual.O;
 import org.levk.udp2p.network.peers.Peer;
+
+import java.util.Arrays;
 
 public class Message {
     private Peer target;
@@ -26,14 +27,10 @@ public class Message {
             return false;
         }
 
-        if (!(((Message) o).getPacket().getHash() == message.getHash())) {
+        if (!Arrays.equals(((Message) o).getPacket().getHash(), message.getHash())) {
             return false;
         }
 
-        if (!(((Message) o).getPeer() == target)) {
-            return false;
-        }
-
-        return true;
+        return ((Message) o).getPeer().equals(target);
     }
 }

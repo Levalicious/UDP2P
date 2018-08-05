@@ -31,22 +31,18 @@ public class ENCItem {
             return false;
         }
 
-        if (!Arrays.equals(this.data, ((ENCItem) o).getEncData())) {
-            return false;
-        }
-
-        return true;
+        return Arrays.equals(this.data, ((ENCItem) o).getEncData());
     }
 
     public boolean isList() {
         if (isEncoded()) {
-            if (data[0] == 0x00) return true;
+            return data[0] == 0x00;
         }
 
         return false;
     }
 
-    public boolean isEncoded() {
+    private boolean isEncoded() {
         try {
             TRENC.decode(data);
             return true;

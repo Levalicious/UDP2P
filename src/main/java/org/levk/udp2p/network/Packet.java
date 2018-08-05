@@ -1,6 +1,5 @@
 package org.levk.udp2p.network;
 
-import com.google.protobuf.ByteString;
 import org.bouncycastle.math.ec.ECPoint;
 import org.levk.udp2p.crypto.SchnorrKey;
 import org.levk.udp2p.crypto.SchnorrSig;
@@ -13,7 +12,6 @@ import java.util.Arrays;
 import static org.levk.udp2p.crypto.SchnorrKey.liftPoint;
 import static org.levk.udp2p.util.ByteUtils.*;
 import static org.levk.udp2p.util.HashUtil.blake2;
-import static org.levk.udp2p.util.HashUtil.blake2ECC;
 import static org.levk.udp2p.util.HashUtil.blake2omit12;
 
 public class Packet {
@@ -217,7 +215,7 @@ public class Packet {
         return SchnorrKey.verify(sig, senderPubkey, getRawHash());
     }
 
-    public byte[] getRawHash() {
+    private byte[] getRawHash() {
         parse();
         byte[] plainMsg = this.getEncodedRaw();
         return blake2(plainMsg);
@@ -231,7 +229,7 @@ public class Packet {
         return blake2(plainMsg);
     }
 
-    public byte[] getEncodedRaw() {
+    private byte[] getEncodedRaw() {
         parse();
         if (raw != null) return raw;
 

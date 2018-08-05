@@ -91,7 +91,7 @@ public class SchnorrKey {
         }
 
         /* Hashes x-coord of R + public key point x coord + message hash, converts to int mod order */
-        BigInteger e = bytesToBigInteger(blake2(merge(bigIntegerToBytes(R.getAffineXCoord().toBigInteger(), 32), point_bytes(pubkey), hash))).mod(order);
+        BigInteger e = bytesToBigInteger(blake2(merge(bigIntegerToBytes(R.getAffineXCoord().toBigInteger(), 32), pubkeybytes, hash))).mod(order);
 
         /* Returns R point + (k e*priv) mod order */
         return new SchnorrSig(R, k.add(e.multiply(bytesToBigInteger(privkey))).mod(order));

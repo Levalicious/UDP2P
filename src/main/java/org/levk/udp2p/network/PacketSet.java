@@ -35,7 +35,7 @@ public class PacketSet {
 
         this.packetType = packetType;
 
-        byte[][] temp = partition(data, MAX_PACKET_PAYLOAD);
+        byte[][] temp = partition(data);
 
         packets = new Packet[temp.length];
 
@@ -95,18 +95,18 @@ public class PacketSet {
 
 
 
-    private static byte[][] partition(byte[] in, int partitionSize) {
-        int partitionCount =  (int)Math.ceil((double)in.length / (double)partitionSize);
+    private static byte[][] partition(byte[] in) {
+        int partitionCount =  (int)Math.ceil((double)in.length / (double) PacketSet.MAX_PACKET_PAYLOAD);
 
-        byte[][] temp = new byte[partitionCount][partitionSize];
+        byte[][] temp = new byte[partitionCount][PacketSet.MAX_PACKET_PAYLOAD];
 
         for (int i = 0; i < partitionCount; i++) {
-            if (in.length < (partitionSize * (i + 1))) {
-                temp[i] = new byte[(in.length - (partitionSize * i))];
+            if (in.length < (PacketSet.MAX_PACKET_PAYLOAD * (i + 1))) {
+                temp[i] = new byte[(in.length - (PacketSet.MAX_PACKET_PAYLOAD * i))];
             }
 
-            for(int j = 0; (j < partitionSize && (partitionSize * i + j) < in.length); j++) {
-                temp[i][j] = in[(partitionSize * i + j)];
+            for(int j = 0; (j < PacketSet.MAX_PACKET_PAYLOAD && (PacketSet.MAX_PACKET_PAYLOAD * i + j) < in.length); j++) {
+                temp[i][j] = in[(PacketSet.MAX_PACKET_PAYLOAD * i + j)];
             }
         }
 

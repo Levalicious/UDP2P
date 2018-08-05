@@ -14,10 +14,12 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.levk.udp2p.util.HashUtil.blake2ECC;
 
-public class P2PSocket extends Thread {
+class P2PSocket {
     private final SecureRandom rand;
 
     private Queue<Message> toSend;
@@ -28,18 +30,17 @@ public class P2PSocket extends Thread {
     private int port;
     private boolean running;
     private PeerSet peers;
-    private int k;
     private SchnorrKey key;
     private DatagramSocket socket;
-    private byte[] buf;
+    private ThreadPoolExecutor executor;
 
-    public P2PSocket(int networkId, SchnorrKey key, int k, int port) throws SocketException {
-        rand = new SecureRandom();
+    public P2PSocket(int threadCount, int networkId, SchnorrKey key, int k, int port) throws SocketException {
+        this.executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(threadCount);
+        this.rand = new SecureRandom();
         this.toSend = new LinkedList<>();
         this.toAck = new LinkedList<>();
         this.received = new LinkedList<>();
         this.key = key;
-        this.k = k;
 
         this.networkId = networkId;
         this.port = port;
@@ -47,13 +48,23 @@ public class P2PSocket extends Thread {
         this.peers = new PeerSet(key.getAddress(), k);
 
         this.socket = new DatagramSocket(port);
-        buf = new byte[1024];
+
+        for (int i = 0; i < threadCount; i++) {
+            executor.submit(new Runnable() {
+                @Override
+                public void run() {
+                    handleSocket();
+                }
+            });
+        }
+
     }
 
-    @Override
-    public void run() {
+    private void handleSocket() {
         int i = 0;
+        byte[] buf;
         while (running) {
+            buf = new byte[1024];
             /* Periodically perform keepalive */
             if (i == 5000) {
                 for (Peer p : peers.toRefresh()) {
@@ -62,12 +73,15 @@ public class P2PSocket extends Thread {
             }
 
             /* Periodically trim dead peers */
-            if (i == 10000) i = 0;
-            peers.trimAllBuckets();
-            i++;
+            if (i == 10000) {
+                i = 0;
+                peers.trimAllBuckets();
+                i++;
+            }
+
             try {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                socket.receive(packet);
+                sockReceive(packet);
 
                 try {
                     /* If not a valid packet, will fail on
@@ -89,9 +103,9 @@ public class P2PSocket extends Thread {
                 }
 
 
+                Message tempMessage = getToSend();
+                if (tempMessage != null) {
 
-                if (!toSend.isEmpty()) {
-                    Message tempMessage = toSend.remove();
 
                     /* Currently making a network
                      * that's 1 giant network with
@@ -102,7 +116,7 @@ public class P2PSocket extends Thread {
                      * prioritizing one networkId
                      * over others. */
                     if (awaitAck(tempMessage.getPacket().getPacketType())) {
-                        toAck.add(tempMessage);
+                        scheduleAck(tempMessage);
                     }
 
                     /* Prepares message for sending */
@@ -113,19 +127,20 @@ public class P2PSocket extends Thread {
                     packet = new DatagramPacket(tempBuf, tempBuf.length, tempPeer.getIpAddress(), port);
 
                     /* Sends packet */
-                    socket.send(packet);
+                    sockSend(packet);
                 }
 
-                if (!toAck.isEmpty()) {
-                    /* Prepares message for sending */
-                    byte[] tempBuf = toAck.peek().getPacket().getEncoded();
-                    Peer tempPeer = toAck.peek().getPeer();
+                Message ackable = peekAck();
+                if (ackable != null) {
+
+                    byte[] tempBuf = ackable.getPacket().getEncoded();
+                    Peer tempPeer = ackable.getPeer();
 
                     /* Creates UDP packet to send */
                     packet = new DatagramPacket(tempBuf, tempBuf.length, tempPeer.getIpAddress(), port);
 
                     /* Sends packet */
-                    socket.send(packet);
+                    sockSend(packet);
                 }
             } catch (IOException n) {
                 System.out.println("Socket failed.");
@@ -137,7 +152,47 @@ public class P2PSocket extends Thread {
         socket.close();
     }
 
-    public boolean awaitAck(int i) {
+    private synchronized Message getAck() {
+        if (this.toAck.isEmpty()) {
+            return null;
+        } else {
+            return this.toAck.remove();
+        }
+    }
+
+    private synchronized void considerAcked(Message m) {
+        this.toAck.remove(m);
+    }
+
+    private synchronized Message peekAck() {
+        if (toAck.isEmpty()) {
+            return null;
+        } else {
+            return toAck.peek();
+        }
+    }
+
+    private synchronized Message getToSend() {
+        if (this.toSend.isEmpty()) {
+            return null;
+        } else {
+            return this.toSend.remove();
+        }
+    }
+
+    private synchronized void scheduleSend(Message m) {
+        this.toSend.add(m);
+    }
+
+    private synchronized void scheduleAck(Message m) {
+        this.toAck.add(m);
+    }
+
+    private synchronized void receive(Message m) {
+        this.received.add(m);
+    }
+
+    private boolean awaitAck(int i) {
         switch (i) {
             case 0: return false;
             case 1: return false;
@@ -154,7 +209,7 @@ public class P2PSocket extends Thread {
         }
     }
 
-    public void handleMessage(Message m) throws IOException, PeerNotFoundException {
+    private void handleMessage(Message m) throws IOException, PeerNotFoundException {
         /* If packet is a join request (0) */
         if (m.getPacket().getPacketType() == 0) {
             Packet replyPacket;
@@ -169,7 +224,7 @@ public class P2PSocket extends Thread {
             }
 
             Message reply = new Message(m.getPeer(), replyPacket);
-            toSend.add(reply);
+            scheduleSend(reply);
             return;
         }
 
@@ -177,7 +232,7 @@ public class P2PSocket extends Thread {
         if (m.getPacket().getPacketType() == 6) {
             Packet replyPacket = new Packet(0, 1, randomByte(), 7, this.key.getAddress(), blake2ECC(this.key.getAddress()), networkId, key);
             Message reply = new Message(m.getPeer(), replyPacket);
-            toSend.add(reply);
+            scheduleSend(reply);
             return;
         }
 
@@ -204,7 +259,7 @@ public class P2PSocket extends Thread {
                 /* Reply with peer request (4) */
                 Packet replyPacket = new Packet(0, 1, randomByte(), 4, new byte[0], blake2ECC(new byte[0]), networkId, key);
                 Message reply = new Message(m.getPeer(), replyPacket);
-                toSend.add(reply);
+                scheduleSend(reply);
                 peers.getPeer(m.getPeer().getAddress()).witness();
                 return;
             }
@@ -218,7 +273,7 @@ public class P2PSocket extends Thread {
                 byte[] ackHash = m.getPacket().getPacketECC();
                 Packet replyPacket = new Packet(0, 1, randomByte(), 10, ackHash, blake2ECC(ackHash), networkId, key);
                 Message reply = new Message(m.getPeer(), replyPacket);
-                toSend.add(reply);
+                scheduleSend(reply);
                 return;
             }
 
@@ -231,7 +286,7 @@ public class P2PSocket extends Thread {
                 /* Reply with peerlist (5) */
                 Packet replyPacket = new Packet(0, 1, randomByte(), 5, encodedPeers, blake2ECC(encodedPeers), networkId, key);
                 Message reply = new Message(m.getPeer(), replyPacket);
-                toSend.add(reply);
+                scheduleSend(reply);
                 peers.getPeer(m.getPeer().getAddress()).witness();
                 return;
             }
@@ -242,7 +297,7 @@ public class P2PSocket extends Thread {
                 byte[] ackHash = m.getPacket().getPacketECC();
                 Packet replyPacket = new Packet(0, 1, randomByte(), 10, ackHash, blake2ECC(ackHash), networkId, key);
                 Message reply = new Message(m.getPeer(), replyPacket);
-                toSend.add(reply);
+                scheduleSend(reply);
 
                 byte[] dat = Snappy.uncompress(m.getPacket().getPayload());
                 for (ENCItem i : TRENC.decode(dat)) {
@@ -260,7 +315,7 @@ public class P2PSocket extends Thread {
             if (m.getPacket().getPacketType() == 8) {
                 Packet replyPacket = new Packet(0, 1, randomByte(), 9, new byte[0], blake2ECC(new byte[0]), networkId, key);
                 Message reply = new Message(m.getPeer(), replyPacket);
-                toSend.add(reply);
+                scheduleSend(reply);
                 peers.getPeer(m.getPeer().getAddress()).witness();
                 return;
             }
@@ -274,7 +329,7 @@ public class P2PSocket extends Thread {
             if (m.getPacket().getPacketType() == 10) {
                 for (Message temp : toAck) {
                     if (Arrays.equals(temp.getPacket().getPacketECC(), m.getPacket().getPayload())) {
-                        toAck.remove(temp);
+                        considerAcked(temp);
                         return;
                     }
                 }
@@ -286,18 +341,18 @@ public class P2PSocket extends Thread {
             /* If not a protocol message */
             /* If the packet isn't from a known peer or from the same network, ignore. */
             if (this.networkId == m.getPacket().getNetworkId()) {
-                received.add(m);
+                receive(m);
             }
         }
 
 
     }
 
-    public void connect(Peer p) {
+    private void connect(Peer p) {
         if (peers.hasSpace(p)) {
             Packet joinPacket = new Packet(0, 1, randomByte(), 0, new byte[0], blake2ECC(new byte[0]), networkId, key);
             Message join = new Message(p, joinPacket);
-            toSend.add(join);
+            scheduleSend(join);
             peers.add(p);
         }
     }
@@ -307,7 +362,7 @@ public class P2PSocket extends Thread {
             InetAddress addr = InetAddress.getByAddress(ip);
             Packet addrReqPacket = new Packet(0, 1, randomByte(), 6, new byte[0], blake2ECC(new byte[0]), networkId, key);
             Message addrReq = new Message(new Peer(new byte[20]), addrReqPacket);
-            toSend.add(addrReq);
+            scheduleSend(addrReq);
         } catch (UnknownHostException u) {
             System.out.println("Connection failed.");
             u.printStackTrace();
@@ -316,7 +371,19 @@ public class P2PSocket extends Thread {
 
 
     public void send(Message m) {
-        toSend.add(m);
+        scheduleSend(m);
+    }
+
+    public synchronized Message receive() {
+        return received.remove();
+    }
+
+    private synchronized void sockReceive(DatagramPacket p) throws IOException {
+        socket.receive(p);
+    }
+
+    private synchronized void sockSend(DatagramPacket p) throws IOException {
+        socket.send(p);
     }
 
     public void broadcast(PacketSet set) {
@@ -325,21 +392,29 @@ public class P2PSocket extends Thread {
         }
     }
 
-    public void broadcast(Packet p) {
+    private void broadcast(Packet p) {
         for (Peer peer : peers.getAllPeers()) {
             send(new Message(peer, p));
         }
     }
 
-    public void ping(Peer p) {
+    public void shutdown() {
+        executor.shutdownNow();
+    }
+
+    private void ping(Peer p) {
         Packet pingPacket = new Packet(0, 1, randomByte(), 8, new byte[0], blake2ECC(new byte[0]), networkId, key);
         Message ping = new Message(p, pingPacket);
-        toSend.add(ping);
+        scheduleSend(ping);
     }
 
     private byte randomByte() {
         byte[] by = new byte[1];
         rand.nextBytes(by);
         return by[0];
+    }
+
+    public String getPeers() {
+        return peers.toString();
     }
 }
